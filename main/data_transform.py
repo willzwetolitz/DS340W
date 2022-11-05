@@ -24,11 +24,11 @@ def transform_file(fname: str):
     # Read given file
     # Do transformations
     # Add in timestamp and stock columns
-    stock = fname.split('/')[2].split('_')[0]
+    stock = fname[fname.rindex('/')+1:].split('_')[0]
     train_data = pd.read_csv(fname)
     transformed_data = do_transform(train_data)
-    timestamps = np.array(train_data[['timestamp']][180:train_data.shape[0]-1])
-    transformed_data.insert(0, 'timestamp', timestamps)
+    timestamps = np.array(train_data[['Timestamp']][180:train_data.shape[0]-1])
+    transformed_data.insert(0, 'Timestamp', timestamps)
     transformed_data.insert(0, 'stock', stock)
     return transformed_data
 
@@ -37,18 +37,33 @@ def clean_files(fnames: list):
     # Get cleaned dataframe for each file
     # Return concatenated dataframes
     df_list = []
-    for fname in fnames:
-        df_list.append(transform_data(fname))
+    for i, fname in enumerate(fnames):
+        print(f'{i+1}/{len(fnames)}\r', end='')
+        df_list.append(transform_file(fname))
+    print()
     df_all = pd.concat(df_list)
     return df_all
+
+def save_data(df: pd.DataFrame, fname: str):
+    df.to_csv(fname)
 
 def main():
 	# We have 60 CSV files
 	#    30 tickers, 1 file containing 2012 to 2018, 1 file containing 2018 to 2020
-	raw_data_dir = 'data_raw'
-	all_train_data = [pd.read_csv(f'{raw_data_dir}/{i}') for i in os.listdir(raw_data_dir) if '2012' in i]
-	all_test_data = [pd.read_csv(f'{raw_data_dir}/{i}') for i in os.listdir(raw_data_dir) if '2020' in i]
 
-	
+    raw_data_dir = 'data_raw'
+    output_dir = 'data_final'
 
+    train_fnames = [f'{raw_data_dir}/{i}' for i in os.listdir(raw_data_dir) if '2012' in i]
+    test_fnames = [f'{raw_data_dir}/{i}' for i in os.listdir(raw_data_dir) if '2020' in i]
+
+    print('train_data')
+    train_df = clean_files(train_fnames)
+    print('test_data')
+    test_df = clean_files(test_fnames)
+
+    print('Saving train_data')
+    save_data(train_df, f'{output_dir}/train_data.csv')
+    print('Saving test_data')
+    save_data(test_df, f'{output_dir}/test_data.csv')
 
