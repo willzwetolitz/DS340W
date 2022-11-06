@@ -1,5 +1,7 @@
 # DS340W
 
+For Implementation Paper assignment, see main/stacked_trading.ipynb where we implement the EXGBEF Stacked Trading model from Derek Snow's paper "Portfolio Construction—Trading Strategies". We achieved similar results to the parent paper.
+
 ### main/
 
 Contains code and dataset used in implementation.
@@ -8,6 +10,7 @@ Contains code and dataset used in implementation.
 | -- | -- |
 | master.ipynb | Notebook to execute other scripts |
 | xgboost_model.py | Script to generate and train XGBoost model |
+| stacked_trading.ipynb | Copy and adjustments made on the stacked_trading notebook in parent_code |
 
 ### parent_code/
 
