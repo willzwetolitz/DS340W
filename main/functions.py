@@ -10,8 +10,9 @@ import pandas as pd
 import seaborn as sns
 import tensorflow as tf
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import KFold
 from pandas_datareader import data as pdr
-import fix_yahoo_finance as yf
+import yfinance as yf
 import os
 from sklearn.ensemble import *
 import xgboost as xgb
@@ -61,12 +62,21 @@ class encoder:
         return self.sess.run(self.second_layer_encoder, feed_dict={self.X: input_})
 
 
+# Fit the encoder to our train data and generate a thought vector for the train data
+def encode(df_train, df_test):
+    tf.compat.v1.reset_default_graph()
+    tf.compat.v1.disable_eager_execution()
+    Encoder = encoder(df_train.reshape((-1, 1)), 32, 0.01, 128, 100)
+    thought_vector_train = Encoder.encode(df_train.reshape((-1, 1)))
+    thought_vector_test = Encoder.encode(df_test.reshape((-1, 1)))
+    return thought_vector_train, thought_vector_test
+
+# Takes in a ticker as a string, outputs a csv to the given destination path
 def data_to_csv(ticker, dest):
-    # Takes in a ticker as a string, outputs a csv to the given destination path
-    yf.pdr_override(tickers=ticker, period = '1d', start='2012-01-01', end='2017-12-31')
+    yf.pdr_override()
     df_full = pdr.get_data_yahoo(ticker, start="2012-01-01", end='2017-12-31').reset_index()
 
-    yf.pdr_override(tickers=ticker, period = '1d', start='2018-01-01', end='2019-12-31')
+    yf.pdr_override()
     df_full_test = pdr.get_data_yahoo(ticker, start="2018-01-01", end='2019-12-31').reset_index()
 
     df_full.to_csv(os.path.join(dest, f'{ticker}_2012_2018.csv'),index=False)
@@ -77,78 +87,109 @@ def get_ticker_data(ticker, folder):
     test = pd.read_csv(os.path.join(folder, f'{ticker}_2018_2020.csv'))
     return train, test
 
-def normalize_ticker(train, test):
-    minmax_train = MinMaxScaler().fit(train.loc[:,'Adj Close'].values.reshape((-1,1)))
-    close_normalize_train = minmax_train.transform(train.loc[:,"Adj Close"].values.reshape((-1,1))).reshape((-1))
-    minmax_test = MinMaxScaler().fit(test.loc[:,'Adj Close'].values.reshape((-1,1)))
-    close_normalize_test = minmax_test.transform(test.loc[:, "Adj Close"].values.reshape((-1,1))).reshape((-1))
-    return close_normalize_train, close_normalize_test
+def get_normalized(df):
+    minmax = MinMaxScaler().fit(df.loc[:,'Adj Close'].values.reshape((-1,1)))
+    df_norm = minmax.transform(df.loc[:,'Adj Close'].values.reshape((-1,1))).reshape((-1))
+    return df_norm, minmax
 
-
-
+# Function that generates close price using normalized close.
+# Takes in a MinMaxScaler and array of predictions, returns
 def reverse_close(scaler, array):
-    # Function that generates close price using normalized close.
-    # Takes in a MinMaxScaler and array of predictions, returns
     return scaler.inverse_transform(array.reshape((-1,1))).reshape((-1))
 
-def encode(close_normalize_train, close_normalize_test):
-    # Fit the encoder to our train data and generate a thought vector for the train data
-    tf.compat.v1.reset_default_graph()
-    tf.compat.v1.disable_eager_execution()
-    Encoder = encoder(close_normalize_train.reshape((-1, 1)), 32, 0.01, 128, 100)
-    thought_vector_train = Encoder.encode(close_normalize_train.reshape((-1, 1)))
-    thought_vector_test = Encoder.encode(close_normalize_test.reshape((-1, 1)))
-    return thought_vector_train, thought_vector_test
+def init_l1(n=500, l=0.1):
+    ada = AdaBoostRegressor(n_estimators=n, learning_rate=l)
+    bagging = BaggingRegressor(n_estimators=n)
+    et = ExtraTreesRegressor(n_estimators=n)
+    gb = GradientBoostingRegressor(n_estimators=n, learning_rate=l)
+    rf = RandomForestRegressor(n_estimators=n)
+    return ada, bagging, et, gb, rf
 
-def fit_l1(thought_vector_train, close_normalize_train):
-    # Takes in a thought_vector (encoded on close_normalize_train) and normalized close for train set.
-    # Returns a list of fit models
-    ada = AdaBoostRegressor(n_estimators=500, learning_rate=0.1)
-    bagging = BaggingRegressor(n_estimators=500)
-    et = ExtraTreesRegressor(n_estimators=500)
-    gb = GradientBoostingRegressor(n_estimators=500, learning_rate=0.1)
-    rf = RandomForestRegressor(n_estimators=500)
-    ada.fit(thought_vector_train[:-1, :], close_normalize_train[1:])
-    bagging.fit(thought_vector_train[:-1, :], close_normalize_train[1:])
-    et.fit(thought_vector_train[:-1, :], close_normalize_train[1:])
-    gb.fit(thought_vector_train[:-1, :], close_normalize_train[1:])
-    rf.fit(thought_vector_train[:-1, :], close_normalize_train[1:])
-    return (ada, bagging, et, gb, rf)
+# Create prediction matrix using k-folding
+# Level 1 models are trained on k-1 folds of the train data then predict on the kth fold
+# 
+def make_l2_training_matrix(models, thought_vector, close_normalize, k=10):
+    trimmed_tv = thought_vector[:-1,:]
 
-def make_preds_l1(models, thought_vector):
-    ada, bagging, et, gb, rf = models
-    ada_pred = ada.predict(thought_vector)
-    bagging_pred = bagging.predict(thought_vector)
-    et_pred = et.predict(thought_vector)
-    gb_pred = gb.predict(thought_vector)
-    rf_pred = rf.predict(thought_vector)
-    return (ada_pred, bagging_pred, et_pred, gb_pred, rf_pred)
+    preds = [np.array([]) for i in range(len(models))]
+    actual = np.array([])
+    next_day = np.array([])
 
+    for train_i, test_i in KFold(k, shuffle=True).split(trimmed_tv):
+        for i in range(len(models)):
+            models[i].fit(trimmed_tv[train_i], close_normalize[train_i+1])
+            preds[i] = np.hstack([preds[i], models[i].predict(trimmed_tv[test_i])])
+        
+        actual = np.hstack([actual, close_normalize[test_i]])
+        next_day = np.hstack([next_day, close_normalize[test_i+1]])
 
-def get_actual(close_normalize, preds):
-    ada_pred, bagging_pred, et_pred, gb_pred, rf_pred = preds
-    ada_actual = np.hstack([close_normalize[0], ada_pred[:-1]])
-    bagging_actual = np.hstack([close_normalize[0], bagging_pred[:-1]])
-    et_actual = np.hstack([close_normalize[0], et_pred[:-1]])
-    gb_actual = np.hstack([close_normalize[0], gb_pred[:-1]])
-    rf_actual = np.hstack([close_normalize[0], rf_pred[:-1]])
-    stack_predict = np.vstack([ada_actual, bagging_actual, et_actual, gb_actual, rf_actual]).T
-    actuals = (ada_actual, bagging_actual, et_actual, gb_actual, rf_actual)
-    return stack_predict, actuals
+    stacked_pred = np.vstack([pred for pred in preds]).T
+    train_Y = next_day.T
+    return stacked_pred, train_Y
 
-def train_l2(stack_predict, close_normalize_train):
+# Takes in a thought_vector (encoded on close_normalize_train) and normalized close for train set.
+# Returns a list of fit models
+def fit_l1(models, thought_vector_train, close_normalize_train):
+    for i in range(len(models)):
+        models[i].fit(thought_vector_train[:-1, :], close_normalize_train[1:])
+    return models
+
+# Make a prediction matrix using a list of models and test data
+def predict(models, thought_vector):
+    preds = []
+    for model in models:
+        preds.append(model.predict(thought_vector))
+    return preds
+
+# Staggers predictions by 1 and stacks predictions
+def get_stacked_predictions(close_normalize, preds):
+    for i in range(len(preds)):
+        preds[i] = np.hstack([close_normalize[0], preds[i][:-1]])
+    return np.vstack([actual for actual in preds]).T
+
+def train_l2(stack_predict, train_y):
     # Takes in train close_normalize and predictions from level one models
     # Returns a trained level 2 XGBoost model
-
     params_xgd = {
         'max_depth': 7,
         'objective': 'reg:logistic',
+        'eval_metric':'rmse', 
+        'early_stopping_rounds':20,
         'learning_rate': 0.05,
         'n_estimators': 10000
     }
-    train_y = close_normalize_train[1:]
     clf = xgb.XGBRegressor(**params_xgd)
-    clf.fit(stack_predict[:-1, :], train_y, eval_set=[(stack_predict[:-1, :], train_y)],
-            eval_metric='rmse', early_stopping_rounds=20, verbose=False)
+    clf.fit(stack_predict[:-1, :], train_y, eval_set=[(stack_predict[:-1, :], train_y)], verbose=False)
     return clf
+
+# Calculate the percentage of the time that the model predicted an increase or decrease in the closing price correctly
+def get_trend_accuracy(pred, actual):
+    correct = 0
+    last_actual, last_predict = 0, 0
+    size = min(len(pred),len(actual))
+    for i in range(size):
+        if not last_actual and not last_predict:
+            last_actual = float(actual[i])
+            last_predict = float(pred[1])
+            continue
+        if last_actual < float(actual[i])*1.001:
+            if last_predict < float(pred[i])*1.001:
+                correct += 1
+        elif float(actual[i])*1.001 < last_actual:
+            if float(pred[i])*1.001 < last_predict:
+                correct += 1
+        last_actual = float(actual[i])
+        last_predict = float(pred[i])
+
+    return correct/size
+
+# Create a pandas DataFrame from a list of lists/np.Arrays
+# Saves countless syntax problems
+def make_dataframe(lsts, cols):
+    if len(lsts) != len(cols):
+        raise Exception(f'{len(lsts)=} does not equal {len(cols)=}')
+    for i in range(len(lsts)):
+        if type(lsts[i]) != np.array:
+            lsts[i] = np.array(lsts[i])
+    return pd.DataFrame(np.vstack([lst.T for lst in lsts]).T, columns = cols)
 
