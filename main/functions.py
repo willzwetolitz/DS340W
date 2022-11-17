@@ -115,13 +115,18 @@ def make_l2_training_matrix(models, thought_vector, close_normalize, k=10):
     actual = np.array([])
     next_day = np.array([])
 
+    k_i = 0
     for train_i, test_i in KFold(k, shuffle=True).split(trimmed_tv):
+        k_i += 1
         for i in range(len(models)):
+            print(f'\tProcessing fold {k_i} . . . \tModel {i+1}/{len(models)}', end='\r')
             models[i].fit(trimmed_tv[train_i], close_normalize[train_i+1])
             preds[i] = np.hstack([preds[i], models[i].predict(trimmed_tv[test_i])])
-        
+
         actual = np.hstack([actual, close_normalize[test_i]])
         next_day = np.hstack([next_day, close_normalize[test_i+1]])
+        print()
+    print('\nDone!')
 
     stacked_pred = np.vstack([pred for pred in preds]).T
     train_Y = next_day.T
@@ -159,7 +164,7 @@ def train_l2(stack_predict, train_y):
         'n_estimators': 10000
     }
     clf = xgb.XGBRegressor(**params_xgd)
-    clf.fit(stack_predict[:-1, :], train_y, eval_set=[(stack_predict[:-1, :], train_y)], verbose=False)
+    clf.fit(stack_predict, train_y, eval_set=[(stack_predict, train_y)], verbose=False)
     return clf
 
 # Calculate the percentage of the time that the model predicted an increase or decrease in the closing price correctly
