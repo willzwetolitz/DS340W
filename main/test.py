@@ -57,7 +57,7 @@ def run_modified_code_1(data_package, loc):
 	# Save and plot predictions
 	print('Saving results . . .',end='\t')
 	output = functions.make_dataframe([date_original, l2_final_pred, test.loc[:,'Adj Close']], cols=['Date', 'Pred', 'True'])
-	output.to_csv('results/' + loc)
+	output.to_csv('results/' + loc, index=False)
 	print('Done')
 
 	acc = l2_model.score(l2_test_matrix, test_norm)
@@ -65,7 +65,7 @@ def run_modified_code_1(data_package, loc):
 	print(f'Accuracy Score: {acc}')
 	print(f'Trend Accuracy: {trend_acc}')
 
-	saveit = 'mod_1_accuracy.csv'
+	saveit = loc + 'mod_1_accuracy.csv'
 	if saveit:
 		path = 'results/' + saveit
 		if not os.path.exists(path):
@@ -111,7 +111,7 @@ def run_parent_code(data_package, loc):
 	# Save and plot predictions
 	print('Saving results . . .',end='\t')
 	output = functions.make_dataframe([date_original, l2_final_pred, test.loc[:,'Adj Close']], cols=['Date', 'Pred', 'True'])
-	output.to_csv('results/' + loc)
+	output.to_csv('results/' + loc + '.csv', index=False)
 	print('Done')
 
 	acc = l2_model.score(l2_test_matrix, test_norm)
@@ -119,7 +119,7 @@ def run_parent_code(data_package, loc):
 	print(f'Accuracy Score: {acc}')
 	print(f'Trend Accuracy: {trend_acc}')
 
-	saveit = 'parent_accuracy.csv'
+	saveit = loc + '_accuracy.csv'
 	if saveit:
 		path = 'results/' + saveit
 		if not os.path.exists(path):
@@ -128,10 +128,10 @@ def run_parent_code(data_package, loc):
 		with open(path, 'a') as f:
 			f.write(f'{acc},{trend_acc}\n')
 
-def get_data():
+def get_data(ticker='JPM'):
 	# Data preparation and encoding
 	print('Loading data . . . ', end='\t')
-	train, test = functions.get_ticker_data('JPM', 'data_raw')
+	train, test = functions.get_ticker_data(ticker, 'data_raw')
 	print('Done')
 	print('Normalizing data . . . ', end='\t')
 	train_norm, scaler_train = functions.get_normalized(train)
@@ -151,8 +151,11 @@ def main(args=['data']):
 		functions.data_to_csv("JPM", "data_raw")
 		print('Done')
 
-	data_package = get_data()
-	run_modified_code_1(data_package, f'mod_1_output.csv')
+
+	for tick in ('JPM', 'AAPL', 'PEGY', 'TSM', 'SINWAV', 'LINEAR', 'TRIANGLE'):
+		data_package = get_data(tick)
+		run_modified_code_1(data_package, f'{tick}_modified_1')
+		run_parent_code(data_package, f'{tick}_parent_1')
 
 	# n = 10
 	# for i in range(n):
