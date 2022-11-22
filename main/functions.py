@@ -198,3 +198,84 @@ def make_dataframe(lsts, cols):
             lsts[i] = np.array(lsts[i])
     return pd.DataFrame(np.vstack([lst.T for lst in lsts]).T, columns = cols)
 
+'''
+df_full = pd.read_csv("JPM_normalized.csv")
+plt.figure(figsize = (8,5))
+print(df_full.head())
+x_range = np.arange(df_full.loc[:,'True'].shape[0])
+plt.plot(x_range, df_full.loc[:,'True'], label = 'Actual Close')
+plt.plot(x_range, df_full.loc[:,'Mod_pred'], label = 'Modified Model Predicted Close')
+plt.legend()
+plt.xticks(x_range[::150], df_full.loc[:,'Date'][::150])
+plt.title('Predicted Adj. Close (Modified stacked learning) vs. Actual Close Price [JPM]')
+plt.show()
+'''
+
+# Subtract actual today from predicted tomorrow to get change prediction
+# Base trader on change prediction (buy 2 if up 5 or more, buy 1 if up 0-5, sell 2 if down 5 or more, sell 2 if down 0-5)
+# Calculate profit/loss from prediction
+
+
+
+def basic_strategy(df, cash):
+    df['diff'] = df['Mod_pred'].sub(df['True'].shift(1))
+    true_col = df['True']
+    diff_col = df['diff']
+    stock = 0
+    for i in range(1, len(true_col)):
+        if diff_col[i] > 0 and cash > true_col[i]:
+            stock += 1
+            cash -= true_col[i]
+        elif diff_col[i] < 0 and stock > 0:
+            stock -= 1
+            cash += true_col[i]
+    return stock*true_col[len(true_col)-1] + cash
+
+def double_strategy(df, cash):
+    df['diff'] = df['Mod_pred'].sub(df['True'].shift(1))
+    true_col = df['True']
+    diff_col = df['diff']
+    stock = 0
+    for i in range(1, len(true_col)):
+        if diff_col[i] > 0 and cash > true_col[i]:
+            if diff_col[i] > 0.5 and cash > 2*true_col[i]:
+                stock += 2
+                cash -= 2*true_col[i]
+            else:
+                stock += 1
+                cash -= true_col[i]
+        elif diff_col[i] < 0 and stock > 0:
+            if diff_col[i] < -0.5 and stock > 1:
+                stock -= 2
+                cash += 2*true_col[i]
+            else:
+                stock -= 1
+                cash += true_col[i]
+    return stock*true_col[len(true_col)-1] + cash
+
+def proportional_strategy(df, cash, per, limit):
+    df['diff'] = df['Mod_pred'].sub(df['True'].shift(1))
+    true_col = df['True']
+    diff_col = df['diff']
+    stock = 0
+    for i in range(1, len(true_col)):
+        if diff_col[i] > 0 and cash > true_col[i]:
+            # buy if possible
+            buy_count = min(diff_col[i]//per + 1, limit)
+            if buy_count*true_col[i] > cash:
+                afford_count = cash//true_col[i]
+                stock += afford_count
+                cash -= afford_count*true_col[i]
+            else:
+                stock += buy_count
+                cash -= buy_count*true_col[i]
+        elif diff_col[i] < 0 and stock > 0:
+            # sell if possible
+            sell_count = min(-diff_col[i]//per + 1, limit)
+            if sell_count < stock:
+                cash += stock * true_col[i]
+                stock = 0
+            else:
+                stock -= sell_count
+                cash += sell_count*true_col[i]
+    return stock*true_col[len(true_col)-1] + cash
